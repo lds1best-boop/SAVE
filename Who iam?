@@ -63,7 +63,7 @@ local LEFT_GAME_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/
 local Whitelist = {
     [1701156929] = true, -- goku_agma
     [8695533338] = true, -- iamnotldsteam  <-- excluded from whitelist/logging
-    [2439933624] = true, -- Diego_Awan10
+    [3567838979] = true, -- Diego_Awan10
     [5799411179] = true, -- H_Hclan
 }
 
