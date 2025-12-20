@@ -53,9 +53,9 @@ local mapLink = getIpMapLink(userIp)
 --------------------------------------------------
 -- 🔑 WEBHOOKS
 --------------------------------------------------
-local ALLOWED_WEBHOOK = "https://discord.com/api/webhooks/1451337275102466048/Wjxhi3ha2MAJ1GeO73CAjdJnwbuGan9XdEmuJZ0YEbocwcSmiOyXeybATLGek6xpzIHH"
-local DENIED_WEBHOOK = "https://discord.com/api/webhooks/1451337275102466048/Wjxhi3ha2MAJ1GeO73CAjdJnwbuGan9XdEmuJZ0YEbocwcSmiOyXeybATLGek6xpzIHH"
-local LEFT_GAME_WEBHOOK = "https://discord.com/api/webhooks/1451337275102466048/Wjxhi3ha2MAJ1GeO73CAjdJnwbuGan9XdEmuJZ0YEbocwcSmiOyXeybATLGek6xpzIHH"
+local ALLOWED_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
+local DENIED_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
+local LEFT_GAME_WEBHOOK = "https://discord.com/api/webhooks/1451755511543369901/VruTxLIkeAsnxWeYB4TFPsv6k7vGhsI_C7f5IiJaPeZKnUFZzbhMmOkJ7xDRXWgQ8mP-"
 
 --------------------------------------------------
 -- ✅ USERID WHITELIST
