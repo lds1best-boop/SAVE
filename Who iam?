@@ -25,13 +25,11 @@ local Tabs = {
 }
 
 
-------------------------------------------------
+--------------------------------------------------
 -- SERVICES
-------------------------------------------------
+--------------------------------------------------
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Rs = cloneref(ReplicatedStorage)
+local Rs = cloneref(game:GetService("ReplicatedStorage"))
 
 local MiningServiceClient =
     require(Rs.Shared.Services.MiningService.MiningServiceClient)
@@ -40,16 +38,16 @@ local MiningInfo =
     require(Rs.Packages.Info).MiningInfo
 
 
-------------------------------------------------
+--------------------------------------------------
 -- SETTINGS
-------------------------------------------------
+--------------------------------------------------
 
 local AutoMine = false
 
 
-------------------------------------------------
+--------------------------------------------------
 -- GET BLOCK INFO
-------------------------------------------------
+--------------------------------------------------
 
 local function getBlockInfo(block)
 
@@ -88,10 +86,9 @@ local function getBlockInfo(block)
 end
 
 
-------------------------------------------------
--- BLOCKED BLOCKS
--- THESE WILL NEVER BE MINED
-------------------------------------------------
+--------------------------------------------------
+-- CHECK IF BLOCK IS STONE OR BEDROCK
+--------------------------------------------------
 
 local function isBlocked(info)
 
@@ -99,19 +96,12 @@ local function isBlocked(info)
         return true
     end
 
-    -- StoneOre
-    -- StoneOre1
-    -- StoneOre2
-    -- StoneOre3
-    -- StoneOre4
-    -- StoneOre5
-
+    -- StoneOre, StoneOre1, StoneOre2, etc.
     if string.match(info.Id, "^StoneOre%d*$") then
         return true
     end
 
     -- Bedrock
-
     if info.Id == "Bedrock" then
         return true
     end
@@ -121,76 +111,67 @@ local function isBlocked(info)
 end
 
 
-------------------------------------------------
--- MINE ONE ORE
-------------------------------------------------
+--------------------------------------------------
+-- DAMAGE SPECIFIC BLOCK
+--------------------------------------------------
 
-local function mineBlock(block)
+local function damageSpecificBlock(blockName)
+
+    if not MiningServiceClient.mineFolder then
+        return false
+    end
+
+    local block =
+        MiningServiceClient.mineFolder:FindFirstChild(blockName)
 
     if not block then
-        return
+        return false
     end
 
     if not block:GetAttribute("isBlock") then
-        return
+        return false
     end
 
     local info = getBlockInfo(block)
 
-    -- Never mine Stone or Bedrock
-
+    -- NEVER damage Stone or Bedrock
     if not info or isBlocked(info) then
-        return
+        return false
     end
 
-    while block.Parent and AutoMine do
+    MiningServiceClient.currentBlock = block
+    MiningServiceClient:damageBlock()
 
-        local currentInfo =
-            getBlockInfo(block)
-
-        if not currentInfo then
-            break
-        end
-
-        -- Safety check
-        -- If it becomes Stone/Bedrock, immediately stop
-
-        if isBlocked(currentInfo) then
-            break
-        end
-
-        MiningServiceClient.currentBlock = block
-
-        MiningServiceClient:damageBlock()
-
-        task.wait()
-
-    end
+    return true
 
 end
 
 
-------------------------------------------------
--- FIND ORES
-------------------------------------------------
+--------------------------------------------------
+-- FIND ONLY ORES
+--------------------------------------------------
 
-local function getOres()
+local function getValidOres()
 
     local ores = {}
 
-    local blocksFolder =
-        workspace.Maps.Mining.Blocks
+    if not MiningServiceClient.mineFolder then
+        return ores
+    end
 
-    for _, block in ipairs(blocksFolder:GetChildren()) do
+    for _, block in ipairs(
+        MiningServiceClient.mineFolder:GetChildren()
+    ) do
 
-        local info = getBlockInfo(block)
+        if block:GetAttribute("isBlock") then
 
-        -- Only add valid ores
-        -- Stone and Bedrock are excluded
+            local info = getBlockInfo(block)
 
-        if info and not isBlocked(info) then
+            if info and not isBlocked(info) then
 
-            table.insert(ores, block)
+                table.insert(ores, block)
+
+            end
 
         end
 
@@ -201,9 +182,9 @@ local function getOres()
 end
 
 
-------------------------------------------------
+--------------------------------------------------
 -- AUTO MINE LOOP
-------------------------------------------------
+--------------------------------------------------
 
 task.spawn(function()
 
@@ -211,22 +192,37 @@ task.spawn(function()
 
         if AutoMine then
 
-            local ores = getOres()
+            local ores = getValidOres()
 
             if #ores > 0 then
-
-                -- Random valid ore
 
                 local target =
                     ores[math.random(1, #ores)]
 
-                mineBlock(target)
+                while target.Parent and AutoMine do
+
+                    local info =
+                        getBlockInfo(target)
+
+                    if not info then
+                        break
+                    end
+
+                    -- Safety check:
+                    -- NEVER mine Stone or Bedrock
+                    if isBlocked(info) then
+                        break
+                    end
+
+                    damageSpecificBlock(target.Name)
+
+                    task.wait()
+
+                end
 
             else
 
-                -- No valid ore available
-
-                task.wait()
+                task.wait(0.1)
 
             end
 
@@ -241,25 +237,27 @@ task.spawn(function()
 end)
 
 
-------------------------------------------------
--- AUTO MINE TOGGLE
-------------------------------------------------
+--------------------------------------------------
+-- FLUENT TOGGLE
+--------------------------------------------------
 
 local Toggle = Tabs.Main:AddToggle("AutoMine", {
     Title = "Auto Mine Ores",
-    Description = "Mines ores only. Never mines Stone or Bedrock.",
+    Description = "Only mines ores. Never mines Stone or Bedrock.",
     Default = false
 })
 
-Toggle:OnChanged(function()
+Toggle:OnChanged(function(value)
 
-    AutoMine = Options.AutoMine.Value
+    AutoMine = value
+
+    print("Auto Mine:", AutoMine)
 
     if AutoMine then
 
         Fluent:Notify({
             Title = "Auto Mine",
-            Content = "Ore-only mining enabled.",
+            Content = "Ore-only mining started.",
             Duration = 2
         })
 
@@ -276,9 +274,9 @@ Toggle:OnChanged(function()
 end)
 
 
-------------------------------------------------
+--------------------------------------------------
 -- SETTINGS
-------------------------------------------------
+--------------------------------------------------
 
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
