@@ -44,6 +44,11 @@ local MiningInfo =
 
 local AutoMine = false
 
+local MIN_DEPTH = -4999
+
+local PATH_X = 9
+local PATH_Z = 9
+
 
 --------------------------------------------------
 -- GET BLOCK INFO
@@ -87,44 +92,95 @@ end
 
 
 --------------------------------------------------
--- CHECK IF BLOCK IS STONE OR BEDROCK
+-- BLOCK TYPES
 --------------------------------------------------
 
-local function isBlocked(info)
+local function isBedrock(info)
 
     if not info then
-        return true
+        return false
     end
 
-    -- StoneOre, StoneOre1, StoneOre2, etc.
-    if string.match(info.Id, "^StoneOre%d*$") then
-        return true
+    return info.Id == "Bedrock"
+end
+
+
+local function isStone(info)
+
+    if not info then
+        return false
     end
 
-    -- Bedrock
-    if info.Id == "Bedrock" then
-        return true
+    return string.match(info.Id, "^StoneOre%d*$") ~= nil
+end
+
+
+local function isOre(info)
+
+    if not info then
+        return false
     end
 
-    return false
+    if isBedrock(info) then
+        return false
+    end
+
+    if isStone(info) then
+        return false
+    end
+
+    return true
+end
+
+
+--------------------------------------------------
+-- GET Y FROM BLOCK NAME
+--------------------------------------------------
+
+local function getBlockY(block)
+
+    if not block then
+        return nil
+    end
+
+    local y =
+        string.match(
+            block.Name,
+            "^[^_]+_(-?%d+)_"
+        )
+
+    return tonumber(y)
 
 end
 
 
 --------------------------------------------------
--- DAMAGE SPECIFIC BLOCK
+-- CHECK DEPTH
 --------------------------------------------------
 
-local function damageSpecificBlock(blockName)
+local function isAllowedDepth(block)
 
-    if not MiningServiceClient.mineFolder then
+    local y = getBlockY(block)
+
+    if y == nil then
         return false
     end
 
-    local block =
-        MiningServiceClient.mineFolder:FindFirstChild(blockName)
+    return y >= MIN_DEPTH
+end
+
+
+--------------------------------------------------
+-- DAMAGE BLOCK
+--------------------------------------------------
+
+local function damageBlock(block)
 
     if not block then
+        return false
+    end
+
+    if not block.Parent then
         return false
     end
 
@@ -132,14 +188,23 @@ local function damageSpecificBlock(blockName)
         return false
     end
 
-    local info = getBlockInfo(block)
+    if not isAllowedDepth(block) then
+        return false
+    end
 
-    -- NEVER damage Stone or Bedrock
-    if not info or isBlocked(info) then
+    local info =
+        getBlockInfo(block)
+
+    if not info then
+        return false
+    end
+
+    if isBedrock(info) then
         return false
     end
 
     MiningServiceClient.currentBlock = block
+
     MiningServiceClient:damageBlock()
 
     return true
@@ -148,28 +213,132 @@ end
 
 
 --------------------------------------------------
--- FIND ONLY ORES
+-- MINE BLOCK UNTIL DESTROYED
 --------------------------------------------------
 
-local function getValidOres()
+local function mineUntilGone(block, allowedType)
 
-    local ores = {}
+    if not block then
+        return false
+    end
+
+    while block.Parent and AutoMine do
+
+        local info =
+            getBlockInfo(block)
+
+        if not info then
+            break
+        end
+
+        if isBedrock(info) then
+            break
+        end
+
+        if not isAllowedDepth(block) then
+            break
+        end
+
+        ------------------------------------------------
+        -- ORE MODE
+        ------------------------------------------------
+
+        if allowedType == "ORE" then
+
+            if not isOre(info) then
+                break
+            end
+
+        ------------------------------------------------
+        -- STONE MODE
+        ------------------------------------------------
+
+        elseif allowedType == "STONE" then
+
+            if not isStone(info) then
+                break
+            end
+
+        ------------------------------------------------
+        -- ANY MODE
+        ------------------------------------------------
+
+        elseif allowedType == "ANY" then
+
+            -- Ore or Stone allowed
+            if not isOre(info)
+                and not isStone(info) then
+                break
+            end
+
+        end
+
+        damageBlock(block)
+
+        task.wait()
+
+    end
+
+    return true
+
+end
+
+
+--------------------------------------------------
+-- GET BLOCK AT COORDINATE
+--------------------------------------------------
+
+local function getBlockAt(x, y, z)
+
+    local name =
+        tostring(x) ..
+        "_" ..
+        tostring(y) ..
+        "_" ..
+        tostring(z)
 
     if not MiningServiceClient.mineFolder then
-        return ores
+        return nil
     end
+
+    return MiningServiceClient.mineFolder:FindFirstChild(name)
+
+end
+
+
+--------------------------------------------------
+-- FIND ORE NEAR CURRENT DEPTH
+--------------------------------------------------
+
+local function findOreAtDepth(y)
+
+    if not MiningServiceClient.mineFolder then
+        return nil
+    end
+
+    local ores = {}
 
     for _, block in ipairs(
         MiningServiceClient.mineFolder:GetChildren()
     ) do
 
-        if block:GetAttribute("isBlock") then
+        if block.Parent then
 
-            local info = getBlockInfo(block)
+            local blockY =
+                getBlockY(block)
 
-            if info and not isBlocked(info) then
+            if blockY
+                and blockY >= MIN_DEPTH
+                and blockY <= y then
 
-                table.insert(ores, block)
+                local info =
+                    getBlockInfo(block)
+
+                if info and isOre(info) then
+
+                    table.insert(ores, block)
+
+                end
 
             end
 
@@ -177,54 +346,193 @@ local function getValidOres()
 
     end
 
-    return ores
+    if #ores > 0 then
+
+        return ores[
+            math.random(1, #ores)
+        ]
+
+    end
+
+    return nil
 
 end
 
 
 --------------------------------------------------
--- AUTO MINE LOOP
+-- DOWNWARD MINING
+--
+-- ORE FIRST
+-- STONE SECOND
 --------------------------------------------------
 
-task.spawn(function()
+local function mineDownToBottom()
 
-    while true do
+    for y = 0, MIN_DEPTH, -1 do
 
-        if AutoMine then
+        if not AutoMine then
+            return
+        end
 
-            local ores = getValidOres()
+        ------------------------------------------------
+        -- FIRST: LOOK FOR AN ORE AT THIS DEPTH
+        ------------------------------------------------
 
-            if #ores > 0 then
+        local ore =
+            findOreAtDepth(y)
 
-                local target =
-                    ores[math.random(1, #ores)]
+        if ore then
 
-                while target.Parent and AutoMine do
+            mineUntilGone(
+                ore,
+                "ORE"
+            )
 
-                    local info =
-                        getBlockInfo(target)
+        end
 
-                    if not info then
-                        break
-                    end
 
-                    -- Safety check:
-                    -- NEVER mine Stone or Bedrock
-                    if isBlocked(info) then
-                        break
-                    end
+        if not AutoMine then
+            return
+        end
 
-                    damageSpecificBlock(target.Name)
 
-                    task.wait()
+        ------------------------------------------------
+        -- SECOND: MINE THE PATH BLOCK
+        ------------------------------------------------
+
+        local pathBlock =
+            getBlockAt(
+                PATH_X,
+                y,
+                PATH_Z
+            )
+
+        if pathBlock then
+
+            local info =
+                getBlockInfo(pathBlock)
+
+            if info then
+
+                ------------------------------------------------
+                -- ORE AT PATH = MINE ORE
+                ------------------------------------------------
+
+                if isOre(info) then
+
+                    mineUntilGone(
+                        pathBlock,
+                        "ORE"
+                    )
+
+                ------------------------------------------------
+                -- STONE = MINE STONE TO GO DOWN
+                ------------------------------------------------
+
+                elseif isStone(info) then
+
+                    mineUntilGone(
+                        pathBlock,
+                        "STONE"
+                    )
+
+                ------------------------------------------------
+                -- BEDROCK = NEVER MINE
+                ------------------------------------------------
+
+                elseif isBedrock(info) then
+
+                    warn(
+                        "Bedrock found at " ..
+                        tostring(y) ..
+                        ". Not mining it."
+                    )
+
+                    return
 
                 end
 
-            else
+            end
 
-                task.wait(0.1)
+        end
+
+    end
+
+end
+
+
+--------------------------------------------------
+-- RANDOM ORE MINING
+--
+-- AFTER REACHING -4999
+--------------------------------------------------
+
+local function randomOreMining()
+
+    while AutoMine do
+
+        local ores = {}
+
+        if MiningServiceClient.mineFolder then
+
+            for _, block in ipairs(
+                MiningServiceClient.mineFolder:GetChildren()
+            ) do
+
+                if block.Parent then
+
+                    local y =
+                        getBlockY(block)
+
+                    ------------------------------------------------
+                    -- ONLY -4999 OR ABOVE
+                    ------------------------------------------------
+
+                    if y and y >= MIN_DEPTH then
+
+                        local info =
+                            getBlockInfo(block)
+
+                        ------------------------------------------------
+                        -- ORE ONLY
+                        ------------------------------------------------
+
+                        if info and isOre(info) then
+
+                            table.insert(
+                                ores,
+                                block
+                            )
+
+                        end
+
+                    end
+
+                end
 
             end
+
+        end
+
+
+        ------------------------------------------------
+        -- RANDOM ORE
+        ------------------------------------------------
+
+        if #ores > 0 then
+
+            local target =
+                ores[
+                    math.random(
+                        1,
+                        #ores
+                    )
+                ]
+
+            mineUntilGone(
+                target,
+                "ORE"
+            )
 
         else
 
@@ -234,32 +542,63 @@ task.spawn(function()
 
     end
 
-end)
+end
+
+
+--------------------------------------------------
+-- MAIN AUTO MINE
+--------------------------------------------------
+
+local function startMining()
+
+    task.spawn(function()
+
+        mineDownToBottom()
+
+        ------------------------------------------------
+        -- WHEN -4999 IS REACHED:
+        -- RANDOM ORE ONLY
+        ------------------------------------------------
+
+        if AutoMine then
+
+            randomOreMining()
+
+        end
+
+    end)
+
+end
 
 
 --------------------------------------------------
 -- FLUENT TOGGLE
 --------------------------------------------------
 
-local Toggle = Tabs.Main:AddToggle("AutoMine", {
-    Title = "Auto Mine Ores",
-    Description = "Only mines ores. Never mines Stone or Bedrock.",
-    Default = false
-})
+local Toggle =
+    Tabs.Main:AddToggle(
+        "AutoMine",
+        {
+            Title = "Auto Mine Ores",
+            Description = "Mine to -4999, then randomly mine ores.",
+            Default = false
+        }
+    )
+
 
 Toggle:OnChanged(function(value)
 
     AutoMine = value
 
-    print("Auto Mine:", AutoMine)
-
     if AutoMine then
 
         Fluent:Notify({
             Title = "Auto Mine",
-            Content = "Ore-only mining started.",
+            Content = "Mining to -4999...",
             Duration = 2
         })
+
+        startMining()
 
     else
 
@@ -281,7 +620,12 @@ end)
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
+InterfaceManager:BuildInterfaceSection(
+    Tabs.Settings
+)
+
+SaveManager:BuildConfigSection(
+    Tabs.Settings
+)
 
 Window:SelectTab(1)
