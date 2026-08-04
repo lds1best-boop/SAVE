@@ -37,6 +37,9 @@ local MiningServiceClient =
 local MiningInfo =
     require(Rs.Packages.Info).MiningInfo
 
+local BlocksData =
+    require(Rs.Shared.Info.MiningInfo.Blocks)
+
 
 --------------------------------------------------
 -- SETTINGS
@@ -92,7 +95,25 @@ end
 
 
 --------------------------------------------------
--- BLOCK TYPES
+-- STONE
+--------------------------------------------------
+
+local function isStone(info)
+
+    if not info then
+        return false
+    end
+
+    return string.match(
+        info.Id,
+        "^StoneOre%d*$"
+    ) ~= nil
+
+end
+
+
+--------------------------------------------------
+-- BEDROCK
 --------------------------------------------------
 
 local function isBedrock(info)
@@ -102,26 +123,20 @@ local function isBedrock(info)
     end
 
     return info.Id == "Bedrock"
+
 end
 
 
-local function isStone(info)
+--------------------------------------------------
+-- SELECTED ORE CHECK
+--------------------------------------------------
+
+local SelectedOres = {}
+
+
+local function isSelectedOre(info)
 
     if not info then
-        return false
-    end
-
-    return string.match(info.Id, "^StoneOre%d*$") ~= nil
-end
-
-
-local function isOre(info)
-
-    if not info then
-        return false
-    end
-
-    if isBedrock(info) then
         return false
     end
 
@@ -129,12 +144,17 @@ local function isOre(info)
         return false
     end
 
-    return true
+    if isBedrock(info) then
+        return false
+    end
+
+    return SelectedOres[info.Id] == true
+
 end
 
 
 --------------------------------------------------
--- GET Y FROM BLOCK NAME
+-- GET Y
 --------------------------------------------------
 
 local function getBlockY(block)
@@ -155,7 +175,7 @@ end
 
 
 --------------------------------------------------
--- CHECK DEPTH
+-- DEPTH CHECK
 --------------------------------------------------
 
 local function isAllowedDepth(block)
@@ -167,6 +187,7 @@ local function isAllowedDepth(block)
     end
 
     return y >= MIN_DEPTH
+
 end
 
 
@@ -199,6 +220,8 @@ local function damageBlock(block)
         return false
     end
 
+    -- NEVER mine Bedrock
+
     if isBedrock(info) then
         return false
     end
@@ -213,13 +236,13 @@ end
 
 
 --------------------------------------------------
--- MINE BLOCK UNTIL DESTROYED
+-- MINE SELECTED ORE
 --------------------------------------------------
 
-local function mineUntilGone(block, allowedType)
+local function mineSelectedOre(block)
 
     if not block then
-        return false
+        return
     end
 
     while block.Parent and AutoMine do
@@ -235,42 +258,8 @@ local function mineUntilGone(block, allowedType)
             break
         end
 
-        if not isAllowedDepth(block) then
+        if not isSelectedOre(info) then
             break
-        end
-
-        ------------------------------------------------
-        -- ORE MODE
-        ------------------------------------------------
-
-        if allowedType == "ORE" then
-
-            if not isOre(info) then
-                break
-            end
-
-        ------------------------------------------------
-        -- STONE MODE
-        ------------------------------------------------
-
-        elseif allowedType == "STONE" then
-
-            if not isStone(info) then
-                break
-            end
-
-        ------------------------------------------------
-        -- ANY MODE
-        ------------------------------------------------
-
-        elseif allowedType == "ANY" then
-
-            -- Ore or Stone allowed
-            if not isOre(info)
-                and not isStone(info) then
-                break
-            end
-
         end
 
         damageBlock(block)
@@ -279,7 +268,41 @@ local function mineUntilGone(block, allowedType)
 
     end
 
-    return true
+end
+
+
+--------------------------------------------------
+-- MINE STONE
+--------------------------------------------------
+
+local function mineStone(block)
+
+    if not block then
+        return
+    end
+
+    while block.Parent and AutoMine do
+
+        local info =
+            getBlockInfo(block)
+
+        if not info then
+            break
+        end
+
+        if isBedrock(info) then
+            break
+        end
+
+        if not isStone(info) then
+            break
+        end
+
+        damageBlock(block)
+
+        task.wait()
+
+    end
 
 end
 
@@ -290,6 +313,10 @@ end
 
 local function getBlockAt(x, y, z)
 
+    if not MiningServiceClient.mineFolder then
+        return nil
+    end
+
     local name =
         tostring(x) ..
         "_" ..
@@ -297,20 +324,16 @@ local function getBlockAt(x, y, z)
         "_" ..
         tostring(z)
 
-    if not MiningServiceClient.mineFolder then
-        return nil
-    end
-
     return MiningServiceClient.mineFolder:FindFirstChild(name)
 
 end
 
 
 --------------------------------------------------
--- FIND ORE NEAR CURRENT DEPTH
+-- FIND SELECTED ORE
 --------------------------------------------------
 
-local function findOreAtDepth(y)
+local function findSelectedOre(y)
 
     if not MiningServiceClient.mineFolder then
         return nil
@@ -334,9 +357,13 @@ local function findOreAtDepth(y)
                 local info =
                     getBlockInfo(block)
 
-                if info and isOre(info) then
+                if info
+                    and isSelectedOre(info) then
 
-                    table.insert(ores, block)
+                    table.insert(
+                        ores,
+                        block
+                    )
 
                 end
 
@@ -349,7 +376,10 @@ local function findOreAtDepth(y)
     if #ores > 0 then
 
         return ores[
-            math.random(1, #ores)
+            math.random(
+                1,
+                #ores
+            )
         ]
 
     end
@@ -360,10 +390,7 @@ end
 
 
 --------------------------------------------------
--- DOWNWARD MINING
---
--- ORE FIRST
--- STONE SECOND
+-- MINE DOWN TO -4999
 --------------------------------------------------
 
 local function mineDownToBottom()
@@ -374,19 +401,17 @@ local function mineDownToBottom()
             return
         end
 
-        ------------------------------------------------
-        -- FIRST: LOOK FOR AN ORE AT THIS DEPTH
-        ------------------------------------------------
+
+        --------------------------------------------------
+        -- SELECTED ORE FIRST
+        --------------------------------------------------
 
         local ore =
-            findOreAtDepth(y)
+            findSelectedOre(y)
 
         if ore then
 
-            mineUntilGone(
-                ore,
-                "ORE"
-            )
+            mineSelectedOre(ore)
 
         end
 
@@ -396,9 +421,9 @@ local function mineDownToBottom()
         end
 
 
-        ------------------------------------------------
-        -- SECOND: MINE THE PATH BLOCK
-        ------------------------------------------------
+        --------------------------------------------------
+        -- PATH BLOCK
+        --------------------------------------------------
 
         local pathBlock =
             getBlockAt(
@@ -414,39 +439,31 @@ local function mineDownToBottom()
 
             if info then
 
-                ------------------------------------------------
-                -- ORE AT PATH = MINE ORE
-                ------------------------------------------------
+                --------------------------------------------------
+                -- SELECTED ORE
+                --------------------------------------------------
 
-                if isOre(info) then
+                if isSelectedOre(info) then
 
-                    mineUntilGone(
-                        pathBlock,
-                        "ORE"
+                    mineSelectedOre(
+                        pathBlock
                     )
 
-                ------------------------------------------------
-                -- STONE = MINE STONE TO GO DOWN
-                ------------------------------------------------
+                --------------------------------------------------
+                -- STONE
+                --------------------------------------------------
 
                 elseif isStone(info) then
 
-                    mineUntilGone(
-                        pathBlock,
-                        "STONE"
+                    mineStone(
+                        pathBlock
                     )
 
-                ------------------------------------------------
-                -- BEDROCK = NEVER MINE
-                ------------------------------------------------
+                --------------------------------------------------
+                -- BEDROCK
+                --------------------------------------------------
 
                 elseif isBedrock(info) then
-
-                    warn(
-                        "Bedrock found at " ..
-                        tostring(y) ..
-                        ". Not mining it."
-                    )
 
                     return
 
@@ -462,9 +479,7 @@ end
 
 
 --------------------------------------------------
--- RANDOM ORE MINING
---
--- AFTER REACHING -4999
+-- RANDOM SELECTED ORES
 --------------------------------------------------
 
 local function randomOreMining()
@@ -484,20 +499,13 @@ local function randomOreMining()
                     local y =
                         getBlockY(block)
 
-                    ------------------------------------------------
-                    -- ONLY -4999 OR ABOVE
-                    ------------------------------------------------
-
                     if y and y >= MIN_DEPTH then
 
                         local info =
                             getBlockInfo(block)
 
-                        ------------------------------------------------
-                        -- ORE ONLY
-                        ------------------------------------------------
-
-                        if info and isOre(info) then
+                        if info
+                            and isSelectedOre(info) then
 
                             table.insert(
                                 ores,
@@ -515,10 +523,6 @@ local function randomOreMining()
         end
 
 
-        ------------------------------------------------
-        -- RANDOM ORE
-        ------------------------------------------------
-
         if #ores > 0 then
 
             local target =
@@ -529,9 +533,8 @@ local function randomOreMining()
                     )
                 ]
 
-            mineUntilGone(
-                target,
-                "ORE"
+            mineSelectedOre(
+                target
             )
 
         else
@@ -546,7 +549,7 @@ end
 
 
 --------------------------------------------------
--- MAIN AUTO MINE
+-- START
 --------------------------------------------------
 
 local function startMining()
@@ -555,15 +558,8 @@ local function startMining()
 
         mineDownToBottom()
 
-        ------------------------------------------------
-        -- WHEN -4999 IS REACHED:
-        -- RANDOM ORE ONLY
-        ------------------------------------------------
-
         if AutoMine then
-
             randomOreMining()
-
         end
 
     end)
@@ -572,15 +568,111 @@ end
 
 
 --------------------------------------------------
--- FLUENT TOGGLE
+-- BUILD ORE LIST
+--------------------------------------------------
+
+local OreValues = {}
+
+for id, data in pairs(BlocksData) do
+
+    if id
+        and not string.match(id, "^StoneOre%d*$")
+        and id ~= "Bedrock" then
+
+        local displayName = id
+
+        if type(data) == "table" then
+
+            displayName =
+                data.name
+                or data.Name
+                or id
+
+        end
+
+        table.insert(
+            OreValues,
+            displayName
+        )
+
+    end
+
+end
+
+
+table.sort(OreValues)
+
+
+--------------------------------------------------
+-- CREATE DROPDOWN
+--------------------------------------------------
+
+local MultiDropdown =
+    Tabs.Main:AddDropdown(
+        "OreSelection",
+        {
+            Title = "Select Ores",
+            Description = "Choose which ores to mine.",
+            Values = OreValues,
+            Multi = true,
+            Default = {}
+        }
+    )
+
+
+--------------------------------------------------
+-- UPDATE SELECTED ORES
+--------------------------------------------------
+
+MultiDropdown:OnChanged(function(values)
+
+    SelectedOres = {}
+
+    for name, enabled in pairs(values) do
+
+        if enabled then
+
+            -- Try to find matching ID
+            for id, data in pairs(BlocksData) do
+
+                local displayName = id
+
+                if type(data) == "table" then
+
+                    displayName =
+                        data.name
+                        or data.Name
+                        or id
+
+                end
+
+                if displayName == name then
+
+                    SelectedOres[id] = true
+
+                    break
+
+                end
+
+            end
+
+        end
+
+    end
+
+end)
+
+
+--------------------------------------------------
+-- AUTO MINE TOGGLE
 --------------------------------------------------
 
 local Toggle =
     Tabs.Main:AddToggle(
         "AutoMine",
         {
-            Title = "Auto Mine Ores",
-            Description = "Mine to -4999, then randomly mine ores.",
+            Title = "Auto Mine",
+            Description = "Mine selected ores to -4999.",
             Default = false
         }
     )
@@ -594,7 +686,7 @@ Toggle:OnChanged(function(value)
 
         Fluent:Notify({
             Title = "Auto Mine",
-            Content = "Mining to -4999...",
+            Content = "Mining selected ores to -4999.",
             Duration = 2
         })
 
