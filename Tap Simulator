@@ -63,7 +63,7 @@ local TargetBoosts = {
 }
 
 local AutoFlames = false
-local InitialCheckComplete = false -- New flag to track if initial check is complete
+local InitialCheckComplete = false
 
 -- Prevents each rune from firing more than once
 local RuneLocked = {
@@ -73,11 +73,20 @@ local RuneLocked = {
     [4] = false
 }
 
+-- Track if rune was already at target when starting (don't fire lock for these)
+local RuneAlreadyComplete = {
+    [1] = false,
+    [2] = false,
+    [3] = false,
+    [4] = false
+}
+
 local function ResetLocks()
     for i = 1, 4 do
         RuneLocked[i] = false
+        RuneAlreadyComplete[i] = false
     end
-    InitialCheckComplete = false -- Reset this flag too
+    InitialCheckComplete = false
 end
 
 local function AllRunesFinished()
@@ -86,17 +95,17 @@ local function AllRunesFinished()
             return false
         end
     end
-
     return true
 end
 
 local function CheckExistingBoosts()
-    -- Check if any runes already have target boosts and lock them
+    -- Check if any runes already have target boosts and mark them as already complete
     for i = 1, 4 do
         local Amount = Holder[tostring(i)].Boost.Amount.Text
         if Amount == TargetBoosts[i] then
             RuneLocked[i] = true
-            print("Rune " .. i .. " already has target boost: " .. Amount)
+            RuneAlreadyComplete[i] = true
+            print("Rune " .. i .. " already has target boost: " .. Amount .. " (will not fire lock)")
         end
     end
     InitialCheckComplete = true
@@ -146,13 +155,14 @@ task.spawn(function()
                             -- Lock BEFORE firing
                             RuneLocked[i] = true
 
-                            -- Fire exactly ONE time
-                            Remote:FireServer(unpack(RuneArgs[i]))
-
-                            print(
-                                "Rune " .. i ..
-                                " fired once at " .. Amount
-                            )
+                            -- Only fire the lock action if this rune wasn't already complete at start
+                            if not RuneAlreadyComplete[i] then
+                                -- Fire exactly ONE time
+                                Remote:FireServer(unpack(RuneArgs[i]))
+                                print("Rune " .. i .. " fired once at " .. Amount)
+                            else
+                                print("Rune " .. i .. " reached target but was already complete (not firing lock)")
+                            end
                         end
                     end
                 end
@@ -179,7 +189,8 @@ Tabs.Settings:AddButton({
         for i = 1, 4 do
             print(
                 "Flame " .. i .. ":",
-                Holder[tostring(i)].Boost.Amount.Text
+                Holder[tostring(i)].Boost.Amount.Text,
+                RuneAlreadyComplete[i] and "(already complete)" or ""
             )
         end
     end
