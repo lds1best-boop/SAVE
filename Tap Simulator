@@ -63,7 +63,6 @@ local TargetBoosts = {
 }
 
 local AutoFlames = false
-local InitialCheckComplete = false
 
 -- Prevents each rune from firing more than once
 local RuneLocked = {
@@ -73,20 +72,10 @@ local RuneLocked = {
     [4] = false
 }
 
--- Track if rune was already at target when starting (don't fire lock for these)
-local RuneAlreadyComplete = {
-    [1] = false,
-    [2] = false,
-    [3] = false,
-    [4] = false
-}
-
 local function ResetLocks()
     for i = 1, 4 do
         RuneLocked[i] = false
-        RuneAlreadyComplete[i] = false
     end
-    InitialCheckComplete = false
 end
 
 local function AllRunesFinished()
@@ -98,22 +87,23 @@ local function AllRunesFinished()
     return true
 end
 
-local function CheckExistingBoosts()
-    -- Check if any runes already have target boosts and mark them as already complete
+local function CheckAndLockExistingBoosts()
+    -- Check if any runes already have target boosts and lock them
     for i = 1, 4 do
-        local Amount = Holder[tostring(i)].Boost.Amount.Text
-        if Amount == TargetBoosts[i] then
-            RuneLocked[i] = true
-            RuneAlreadyComplete[i] = true
-            print("Rune " .. i .. " already has target boost: " .. Amount .. " (will not fire lock)")
+        if not RuneLocked[i] then
+            local Amount = Holder[tostring(i)].Boost.Amount.Text
+            if Amount == TargetBoosts[i] then
+                -- Lock this rune since it already has the target boost
+                RuneLocked[i] = true
+                print("Rune " .. i .. " already has target boost: " .. Amount .. " (locked)")
+            end
         end
     end
-    InitialCheckComplete = true
 end
 
 local Toggle = Tabs.Main:AddToggle("AutoFlames", {
     Title = "Auto Flames",
-    Description = "Stops automatically after all 4 boosts are reached",
+    Description = "hi",
     Default = false
 })
 
@@ -121,8 +111,8 @@ Toggle:OnChanged(function()
     AutoFlames = Toggle.Value
 
     if AutoFlames then
-        -- Check existing boosts first
-        CheckExistingBoosts()
+        -- First check and lock any existing boosts
+        CheckAndLockExistingBoosts()
         
         -- If all runes are already locked, stop immediately
         if AllRunesFinished() then
@@ -141,40 +131,36 @@ end)
 task.spawn(function()
     while true do
         if AutoFlames then
-            -- Only start rolling after initial check is complete
-            if InitialCheckComplete then
-                -- Keep rolling/collecting
-                Remote:FireServer(unpack(CollectArgs))
+            -- Keep rolling/collecting
+            Remote:FireServer(unpack(CollectArgs))
 
-                -- Check every boost
-                for i = 1, 4 do
-                    if not RuneLocked[i] then
-                        local Amount = Holder[tostring(i)].Boost.Amount.Text
+            -- Check every boost
+            for i = 1, 4 do
+                if not RuneLocked[i] then
+                    local Amount = Holder[tostring(i)].Boost.Amount.Text
 
-                        if Amount == TargetBoosts[i] then
-                            -- Lock BEFORE firing
-                            RuneLocked[i] = true
+                    if Amount == TargetBoosts[i] then
+                        -- Lock BEFORE firing
+                        RuneLocked[i] = true
 
-                            -- Only fire the lock action if this rune wasn't already complete at start
-                            if not RuneAlreadyComplete[i] then
-                                -- Fire exactly ONE time
-                                Remote:FireServer(unpack(RuneArgs[i]))
-                                print("Rune " .. i .. " fired once at " .. Amount)
-                            else
-                                print("Rune " .. i .. " reached target but was already complete (not firing lock)")
-                            end
-                        end
+                        -- Fire exactly ONE time
+                        Remote:FireServer(unpack(RuneArgs[i]))
+
+                        print(
+                            "Rune " .. i ..
+                            " fired once at " .. Amount
+                        )
                     end
                 end
+            end
 
-                -- ALL 4 reached their targets
-                if AllRunesFinished() then
-                    AutoFlames = false
-                    Toggle:SetValue(false)
+            -- ALL 4 reached their targets
+            if AllRunesFinished() then
+                AutoFlames = false
+                Toggle:SetValue(false)
 
-                    print("All 4 boosts reached!")
-                    print("Auto Flames stopped.")
-                end
+                print("All 4 boosts reached!")
+                print("Auto Flames stopped.")
             end
         end
 
@@ -190,7 +176,7 @@ Tabs.Settings:AddButton({
             print(
                 "Flame " .. i .. ":",
                 Holder[tostring(i)].Boost.Amount.Text,
-                RuneAlreadyComplete[i] and "(already complete)" or ""
+                RuneLocked[i] and "(locked)" or ""
             )
         end
     end
