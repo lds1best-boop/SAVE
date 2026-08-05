@@ -30,12 +30,12 @@ local Remote = ReplicatedStorage
     :WaitForChild("system")
     :WaitForChild("ByteNetReliable")
 
--- Collect / roll
+-- Roll / collect
 local CollectArgs = {
     buffer.fromstring("\n\006\000Flames")
 }
 
--- Runes
+-- Rune remotes
 local RuneArgs = {
     [1] = {
         buffer.fromstring("\004\001\006\000Flames")
@@ -54,7 +54,7 @@ local RuneArgs = {
     }
 }
 
--- Required boost for each one
+-- Required boost values
 local TargetBoosts = {
     [1] = "x3.5",
     [2] = "x5",
@@ -63,8 +63,9 @@ local TargetBoosts = {
 }
 
 local AutoFlames = false
+local Starting = false
 
--- Prevents each rune from firing more than once
+-- Locked = target already reached and rune has fired
 local RuneLocked = {
     [1] = false,
     [2] = false,
@@ -78,32 +79,36 @@ local function ResetLocks()
     end
 end
 
-local function AllRunesFinished()
-    for i = 1, 4 do
-        if not RuneLocked[i] then
-            return false
-        end
-    end
-    return true
-end
-
-local function CheckAndLockExistingBoosts()
-    -- Check if any runes already have target boosts and lock them
+local function CheckBoosts()
     for i = 1, 4 do
         if not RuneLocked[i] then
             local Amount = Holder[tostring(i)].Boost.Amount.Text
+
             if Amount == TargetBoosts[i] then
-                -- Lock this rune since it already has the target boost
                 RuneLocked[i] = true
-                print("Rune " .. i .. " already has target boost: " .. Amount .. " (locked)")
+
+                -- Fire this rune exactly once
+                Remote:FireServer(unpack(RuneArgs[i]))
+
+                print("Rune " .. i .. " locked at " .. Amount)
             end
         end
     end
 end
 
+local function AllLocked()
+    for i = 1, 4 do
+        if not RuneLocked[i] then
+            return false
+        end
+    end
+
+    return true
+end
+
 local Toggle = Tabs.Main:AddToggle("AutoFlames", {
     Title = "Auto Flames",
-    Description = "hi",
+    Description = "Check boosts first, then roll",
     Default = false
 })
 
@@ -111,72 +116,79 @@ Toggle:OnChanged(function()
     AutoFlames = Toggle.Value
 
     if AutoFlames then
-        -- First check and lock any existing boosts
-        CheckAndLockExistingBoosts()
-        
-        -- If all runes are already locked, stop immediately
-        if AllRunesFinished() then
+        ResetLocks()
+        Starting = true
+
+        print("Checking boosts before rolling...")
+
+        -- FIRST: check current boosts BEFORE any rolling
+        CheckBoosts()
+
+        -- If everything is already complete, don't roll
+        if AllLocked() then
+            Starting = false
             AutoFlames = false
             Toggle:SetValue(false)
-            print("All 4 boosts already reached!")
-            print("Auto Flames stopped.")
-        else
-            print("Auto Flames started")
+
+            print("All boosts already reached. Nothing to roll.")
+            return
         end
+
+        -- Wait 2 seconds before starting roll
+        task.spawn(function()
+            task.wait(2)
+
+            if AutoFlames then
+                Starting = false
+                print("2 seconds finished. Starting roll...")
+            else
+                Starting = false
+            end
+        end)
+
     else
-        print("Auto Flames stopped")
+        Starting = false
+        ResetLocks()
+
+        print("Auto Flames stopped.")
     end
 end)
 
 task.spawn(function()
     while true do
-        if AutoFlames then
-            -- Keep rolling/collecting
-            Remote:FireServer(unpack(CollectArgs))
 
-            -- Check every boost
-            for i = 1, 4 do
-                if not RuneLocked[i] then
-                    local Amount = Holder[tostring(i)].Boost.Amount.Text
+        if AutoFlames and not Starting then
 
-                    if Amount == TargetBoosts[i] then
-                        -- Lock BEFORE firing
-                        RuneLocked[i] = true
+            -- Keep checking boosts
+            CheckBoosts()
 
-                        -- Fire exactly ONE time
-                        Remote:FireServer(unpack(RuneArgs[i]))
-
-                        print(
-                            "Rune " .. i ..
-                            " fired once at " .. Amount
-                        )
-                    end
-                end
-            end
-
-            -- ALL 4 reached their targets
-            if AllRunesFinished() then
+            -- If all 4 reached target, stop rolling
+            if AllLocked() then
                 AutoFlames = false
                 Toggle:SetValue(false)
 
                 print("All 4 boosts reached!")
-                print("Auto Flames stopped.")
+                print("Roll stopped.")
+
+            else
+                -- Roll only if there are still boosts to reach
+                Remote:FireServer(unpack(CollectArgs))
             end
         end
 
+        -- Continuous checking
         task.wait()
     end
 end)
 
 Tabs.Settings:AddButton({
     Title = "Print Current Boosts",
-    Description = "Prints all 4 boost values",
+    Description = "lol",
     Callback = function()
         for i = 1, 4 do
             print(
                 "Flame " .. i .. ":",
-                Holder[tostring(i)].Boost.Amount.Text,
-                RuneLocked[i] and "(locked)" or ""
+                Holder[tostring(i)].Boost.Amount.Text
             )
         end
     end
